@@ -1,0 +1,14 @@
+{
+  "name": "@sv/React",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.ts",
+  "buildOptions": {
+    "name": "React",
+    "formats": [
+      "iife",
+      "cjs",
+      "esm"
+    ]
+  }
+}

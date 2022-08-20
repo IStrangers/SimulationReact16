@@ -1,0 +1,14 @@
+{
+  "name": "@sv/ReactDOM",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.ts",
+  "buildOptions": {
+    "name": "ReactDOM",
+    "formats": [
+      "iife",
+      "cjs",
+      "esm"
+    ]
+  }
+}

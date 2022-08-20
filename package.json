@@ -1,0 +1,18 @@
+{
+  "name": "SimulationReact",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev:react": "node scripts/dev.js react",
+    "dev:react-dom": "node scripts/dev.js react-dom"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "esbuild": "^0.15.5",
+    "minimist": "^1.2.6",
+    "typescript": "^4.7.4"
+  }
+}
