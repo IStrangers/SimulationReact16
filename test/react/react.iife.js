@@ -41,8 +41,8 @@ var React = (() => {
 
   // packages/types/src/effectType.ts
   var PLACEMENT = Symbol.for("PLACEMENT");
-  var UPDATE = Symbol.for("PLACEMENT");
-  var DELETION = Symbol.for("PLACEMENT");
+  var UPDATE = Symbol.for("UPDATE");
+  var DELETION = Symbol.for("DELETION");
 
   // packages/react/index.ts
   function createElement(type, config, ...children) {

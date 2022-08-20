@@ -15,13 +15,14 @@ var TAG_COMMENT = Symbol.for("TAG_COMMENT");
 
 // packages/types/src/effectType.ts
 var PLACEMENT = Symbol.for("PLACEMENT");
-var UPDATE = Symbol.for("PLACEMENT");
-var DELETION = Symbol.for("PLACEMENT");
+var UPDATE = Symbol.for("UPDATE");
+var DELETION = Symbol.for("DELETION");
 
 // packages/react/src/schedule.ts
 var workInProgressRoot = null;
 var nextUnitOfWork = null;
 var currentRoot = null;
+var deletions = [];
 function startWork() {
   requestIdleCallback(workLoop, { timeout: 500 });
 }
@@ -38,21 +39,39 @@ function workLoop(deadline) {
   startWork();
 }
 function commitRoot() {
+  deletions.forEach(commitWork);
   let currentFiber = workInProgressRoot.firstEffect;
   while (currentFiber) {
     commitWork(currentFiber);
     currentFiber = currentFiber.nextEffect;
   }
+  deletions.length = 0;
   currentRoot = workInProgressRoot;
   workInProgressRoot = null;
 }
 function commitWork(currentFiber) {
   if (!currentFiber)
     return;
-  const parentFiber = currentFiber.parent;
+  const {
+    parent: parentFiber,
+    effectTag,
+    stateNode,
+    props,
+    type,
+    children,
+    alternate
+  } = currentFiber;
   const parentNode = parentFiber.stateNode;
-  if (currentFiber.effectTag === PLACEMENT) {
-    parentNode.appendChild(currentFiber.stateNode);
+  if (effectTag === PLACEMENT) {
+    parentNode.appendChild(stateNode);
+  } else if (effectTag === DELETION) {
+    parentNode.removeChild(stateNode);
+  } else if (effectTag === UPDATE) {
+    if (type === TEXT && children !== alternate.children) {
+      stateNode.textContent = children;
+    } else {
+      updateDOM(stateNode, alternate.props, props);
+    }
   }
   currentFiber.effectTag = null;
 }
@@ -119,33 +138,56 @@ function updateHostRoot(currentFiber) {
 }
 function reconcileChildren(currentFiber, children) {
   let childrenIndex = 0;
+  let oldFiber = currentFiber.alternate && currentFiber.alternate.child;
   let prevSibling;
   while (childrenIndex < children.length) {
-    const child = children[childrenIndex++];
-    let tag;
-    if (child.type === TEXT) {
-      tag = TAG_TEXT;
-    } else if (isString(child.type)) {
-      tag = TAG_ELEMENT;
-    } else {
-      tag = TAG_COMMENT;
+    const newChild = children[childrenIndex++];
+    const sameType = oldFiber && newChild && oldFiber.type === newChild.type;
+    let newFiber;
+    if (sameType) {
+      newFiber = {
+        tag: oldFiber.tag,
+        type: oldFiber.type,
+        props: newChild.props,
+        children: newChild.children,
+        stateNode: oldFiber.stateNode,
+        parent: currentFiber,
+        alternate: oldFiber,
+        effectTag: UPDATE,
+        nextEffect: null
+      };
+    } else if (newChild) {
+      let tag;
+      if (newChild.type === TEXT) {
+        tag = TAG_TEXT;
+      } else if (isString(newChild.type)) {
+        tag = TAG_ELEMENT;
+      } else {
+        tag = TAG_COMMENT;
+      }
+      newFiber = {
+        tag,
+        type: newChild.type,
+        props: newChild.props,
+        children: newChild.children,
+        stateNode: null,
+        parent: currentFiber,
+        effectTag: PLACEMENT,
+        nextEffect: null
+      };
+    } else if (oldFiber) {
+      oldFiber.effectTag = DELETION;
+      deletions.push(oldFiber);
     }
-    const childFiber = {
-      tag,
-      type: child.type,
-      props: child.props,
-      children: child.children,
-      stateNode: null,
-      parent: currentFiber,
-      effectTag: PLACEMENT,
-      nextEffect: null
-    };
+    if (oldFiber) {
+      oldFiber = oldFiber.sibling;
+    }
     if (childrenIndex === 1) {
-      currentFiber.child = childFiber;
+      currentFiber.child = newFiber;
     } else {
-      prevSibling.sibling = childFiber;
+      prevSibling.sibling = newFiber;
     }
-    prevSibling = childFiber;
+    prevSibling = newFiber;
   }
 }
 function createDOM(currentFiber) {
@@ -185,8 +227,19 @@ function setProp(dom, key, value) {
   }
 }
 function scheduleRoot(rootFiber) {
-  workInProgressRoot = rootFiber;
-  nextUnitOfWork = rootFiber;
+  if (currentRoot && currentRoot.alternate) {
+    workInProgressRoot = currentRoot.alternate;
+    workInProgressRoot.props = rootFiber.props;
+    workInProgressRoot.children = rootFiber.children;
+    workInProgressRoot.alternate = currentRoot;
+  } else if (currentRoot) {
+    rootFiber.alternate = currentRoot;
+    workInProgressRoot = rootFiber;
+  } else {
+    workInProgressRoot = rootFiber;
+  }
+  workInProgressRoot.firstEffect = workInProgressRoot.lastEffect = workInProgressRoot.nextEffect = null;
+  nextUnitOfWork = workInProgressRoot;
 }
 
 // packages/react-dom/index.ts

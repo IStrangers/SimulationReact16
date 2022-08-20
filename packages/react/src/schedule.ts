@@ -1,9 +1,10 @@
 import { hasOwnProperty, isString } from "../../shared"
-import { PLACEMENT, TAG_COMMENT, TAG_ELEMENT, TAG_ROOT, TAG_TEXT, TEXT } from "../../types"
+import { DELETION, PLACEMENT, TAG_COMMENT, TAG_ELEMENT, TAG_ROOT, TAG_TEXT, TEXT, UPDATE } from "../../types"
 
 let workInProgressRoot : any = null
 let nextUnitOfWork : any = null
 let currentRoot : any = null
+const deletions : Array<any> = []
 
 function startWork() {
   requestIdleCallback(workLoop,{ timeout: 500 })
@@ -23,21 +24,34 @@ function workLoop(deadline : any) {
 }
 
 function commitRoot() {
+  deletions.forEach(commitWork)
   let currentFiber = workInProgressRoot.firstEffect
   while(currentFiber) {
     commitWork(currentFiber)
     currentFiber = currentFiber.nextEffect
   }
+  deletions.length = 0
   currentRoot = workInProgressRoot
   workInProgressRoot = null
 }
 
 function commitWork(currentFiber : any) {
   if(!currentFiber) return
-  const parentFiber = currentFiber.parent
+  const  { 
+    parent: parentFiber,effectTag,stateNode,
+    props,type,children,alternate 
+  } = currentFiber
   const parentNode = parentFiber.stateNode
-  if(currentFiber.effectTag === PLACEMENT) {
-    parentNode.appendChild(currentFiber.stateNode)
+  if(effectTag === PLACEMENT) {
+    parentNode.appendChild(stateNode)
+  } else if(effectTag === DELETION) {
+    parentNode.removeChild(stateNode)
+  } else if(effectTag === UPDATE) {
+    if(type === TEXT && children !== alternate.children) {
+      stateNode.textContent = children
+    } else {
+      updateDOM(stateNode,alternate.props,props)
+    }
   }
   currentFiber.effectTag = null
 }
@@ -111,33 +125,59 @@ function updateHostRoot(currentFiber : any) {
 
 function reconcileChildren(currentFiber : any,children : Array<any>) {
   let childrenIndex = 0
+  let oldFiber = currentFiber.alternate && currentFiber.alternate.child
   let prevSibling : any
   while(childrenIndex < children.length) {
-    const child = children[childrenIndex++]
-    let tag : Symbol
-    if(child.type === TEXT) {
-      tag = TAG_TEXT
-    } else if(isString(child.type)) {
-      tag = TAG_ELEMENT
-    } else {
-      tag = TAG_COMMENT
+    const newChild = children[childrenIndex++]
+    const sameType = oldFiber && newChild && oldFiber.type === newChild.type
+
+    let newFiber
+    if(sameType) {
+      newFiber = {
+        tag: oldFiber.tag,
+        type: oldFiber.type,
+        props: newChild.props,
+        children: newChild.children,
+        stateNode: oldFiber.stateNode,
+        parent: currentFiber,
+        alternate: oldFiber,
+        effectTag: UPDATE,
+        nextEffect: null
+      }
+    } else if(newChild){
+      let tag : Symbol
+      if(newChild.type === TEXT) {
+        tag = TAG_TEXT
+      } else if(isString(newChild.type)) {
+        tag = TAG_ELEMENT
+      } else {
+        tag = TAG_COMMENT
+      }
+      newFiber = {
+        tag,
+        type: newChild.type,
+        props: newChild.props,
+        children: newChild.children,
+        stateNode: null,
+        parent: currentFiber,
+        effectTag: PLACEMENT,
+        nextEffect: null
+      }
+    } else if(oldFiber){
+      oldFiber.effectTag = DELETION
+      deletions.push(oldFiber)
     }
-    const childFiber = {
-      tag,
-      type: child.type,
-      props: child.props,
-      children: child.children,
-      stateNode: null,
-      parent: currentFiber,
-      effectTag: PLACEMENT,
-      nextEffect: null
+
+    if(oldFiber) {
+      oldFiber = oldFiber.sibling
     }
+
     if(childrenIndex === 1) {
-      currentFiber.child = childFiber
+      currentFiber.child = newFiber
     } else {
-      prevSibling.sibling = childFiber
+      prevSibling.sibling = newFiber
     }
-    prevSibling = childFiber
+    prevSibling = newFiber
   }
 }
 
@@ -182,8 +222,21 @@ function setProp(dom : HTMLElement,key : string,value : any) {
 }
 
 function scheduleRoot(rootFiber : any) {
-  workInProgressRoot = rootFiber
-  nextUnitOfWork = rootFiber
+  if(currentRoot && currentRoot.alternate) {
+    workInProgressRoot = currentRoot.alternate
+    workInProgressRoot.props = rootFiber.props
+    workInProgressRoot.children = rootFiber.children
+    workInProgressRoot.alternate = currentRoot
+  } else if(currentRoot) {
+    rootFiber.alternate = currentRoot
+    workInProgressRoot = rootFiber
+  } else {
+    workInProgressRoot = rootFiber
+  }
+  (workInProgressRoot.firstEffect =
+  workInProgressRoot.lastEffect = 
+  workInProgressRoot.nextEffect = null)
+  nextUnitOfWork = workInProgressRoot
 }
 
 export {

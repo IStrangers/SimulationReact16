@@ -1,6 +1,6 @@
 const PLACEMENT = Symbol.for("PLACEMENT")
-const UPDATE = Symbol.for("PLACEMENT")
-const DELETION = Symbol.for("PLACEMENT")
+const UPDATE = Symbol.for("UPDATE")
+const DELETION = Symbol.for("DELETION")
 
 export {
   PLACEMENT,
