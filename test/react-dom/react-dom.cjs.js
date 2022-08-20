@@ -25,154 +25,181 @@ __export(react_dom_exports, {
 module.exports = __toCommonJS(react_dom_exports);
 
 // packages/shared/src/utils.ts
-function isArray(value) {
-  return Array.isArray(value);
+function isString(value) {
+  return typeof value === "string";
 }
-function isFunction(value) {
-  return typeof value === "function";
-}
-function onlyOne(items) {
-  return isArray(items) ? items[0] : items;
-}
-function flatten(array) {
-  const flatted = [];
-  function flat(items) {
-    items.forEach((item) => {
-      if (isArray(item)) {
-        flat(item);
-      } else {
-        flatted.push(item);
-      }
-    });
-  }
-  flat(array);
-  return flatted;
-}
-
-// packages/react/src/updater.ts
-var UpdaterQueue = class {
-  updaters = [];
-  isPending = false;
-  add(updater) {
-    this.updaters.push(updater);
-  }
-  batchUpdate() {
-    let updater;
-    while (updater = this.updaters.pop()) {
-      updater.updateComponent();
-    }
-    this.isPending = false;
-  }
-};
-var updaterQueue = new UpdaterQueue();
-function batchedUpdates(fn) {
-  updaterQueue.isPending = true;
-  fn();
-  updaterQueue.isPending = false;
-  updaterQueue.batchUpdate();
-}
-
-// packages/react/src/event.ts
-function addEventListener(dom, eventType, listener) {
-  eventType = eventType.toLowerCase();
-  const eventStore = dom["eventStore"] || (dom["eventStore"] = {});
-  eventStore[eventType] = listener;
-  document.addEventListener(eventType.slice(2), dispatchEvent, false);
-}
-var syntheticEvent = null;
-function dispatchEvent(event) {
-  let { type, target } = event;
-  const eventType = `on${type}`;
-  syntheticEvent = getSyntheticEvent(event);
-  updaterQueue.isPending = true;
-  while (target) {
-    const eventStore = target["eventStore"];
-    const listener = eventStore && eventStore[eventType];
-    if (listener) {
-      listener.call(target, syntheticEvent);
-    }
-    target = target["parentNode"];
-  }
-  for (let key in syntheticEvent) {
-    syntheticEvent[key] = void 0;
-  }
-  updaterQueue.isPending = false;
-  updaterQueue.batchUpdate();
-}
-var SyntheticEvent = class {
-  persist() {
-    syntheticEvent = null;
-  }
-};
-function getSyntheticEvent(nativeEvent) {
-  if (!syntheticEvent) {
-    syntheticEvent = new SyntheticEvent();
-  }
-  syntheticEvent["nativeEvent"] = nativeEvent;
-  for (let key in nativeEvent) {
-    const value = nativeEvent[key];
-    if (isFunction(value)) {
-      syntheticEvent[key] = value.bind(nativeEvent);
-    } else {
-      syntheticEvent[key] = value;
-    }
-  }
-  return syntheticEvent;
+function hasOwnProperty(value, key) {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 // packages/types/src/nodeType.ts
 var TEXT = Symbol.for("TEXT");
-var ELEMENT = Symbol.for("ELEMENT");
-var CLASS_COMPONENT = Symbol.for("CLASS_COMPONENT");
-var FUNCTION_COMPONENT = Symbol.for("FUNCTION_COMPONENT");
+var TAG_ROOT = Symbol.for("TAG_ROOT");
+var TAG_ELEMENT = Symbol.for("TAG_ELEMENT");
+var TAG_TEXT = Symbol.for("TAG_TEXT");
+var TAG_COMMENT = Symbol.for("TAG_COMMENT");
 
-// packages/react/src/vdom.ts
-function createDOM(element) {
-  element = onlyOne(element);
-  let dom;
-  const { nodeType } = element;
-  if (nodeType === TEXT) {
-    dom = document.createTextNode(element.content);
-  } else if (nodeType === ELEMENT) {
-    dom = createNativeDOM(element);
-  } else if (nodeType === CLASS_COMPONENT) {
-    dom = createClassComponentDOM(element);
-  } else if (nodeType === FUNCTION_COMPONENT) {
-    dom = createFunctionComponentDOM(element);
-  } else {
-    dom = document.createComment(element.content ? element.content : "");
+// packages/types/src/effectType.ts
+var PLACEMENT = Symbol.for("PLACEMENT");
+var UPDATE = Symbol.for("PLACEMENT");
+var DELETION = Symbol.for("PLACEMENT");
+
+// packages/react/src/schedule.ts
+var workInProgressRoot = null;
+var nextUnitOfWork = null;
+var currentRoot = null;
+function startWork() {
+  requestIdleCallback(workLoop, { timeout: 500 });
+}
+startWork();
+function workLoop(deadline) {
+  let shouldYield = false;
+  while (nextUnitOfWork && !shouldYield) {
+    nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+    shouldYield = deadline.timeRemaining() < 1;
   }
-  element.dom = dom;
-  return dom;
+  if (!nextUnitOfWork && workInProgressRoot) {
+    commitRoot();
+  }
+  startWork();
 }
-function createNativeDOM(element) {
-  const { type, ref, props, children } = element;
-  const dom = document.createElement(type);
-  ref && setRef(dom, ref);
-  props && setProps(dom, props);
-  children && createChildrenDOM(dom, children);
-  return dom;
+function commitRoot() {
+  let currentFiber = workInProgressRoot.firstEffect;
+  while (currentFiber) {
+    commitWork(currentFiber);
+    currentFiber = currentFiber.nextEffect;
+  }
+  currentRoot = workInProgressRoot;
+  workInProgressRoot = null;
 }
-function setRef(current, ref) {
-  if (ref) {
-    ref.current = current;
+function commitWork(currentFiber) {
+  if (!currentFiber)
+    return;
+  const parentFiber = currentFiber.parent;
+  const parentNode = parentFiber.stateNode;
+  if (currentFiber.effectTag === PLACEMENT) {
+    parentNode.appendChild(currentFiber.stateNode);
+  }
+  currentFiber.effectTag = null;
+}
+function performUnitOfWork(currentFiber) {
+  beginWork(currentFiber);
+  if (currentFiber.child) {
+    return currentFiber.child;
+  }
+  while (currentFiber) {
+    completeUnitOfWork(currentFiber);
+    if (currentFiber.sibling) {
+      return currentFiber.sibling;
+    }
+    currentFiber = currentFiber.parent;
   }
 }
-function createChildrenDOM(parentNode, children) {
-  children && flatten(children).forEach((child, index) => {
-    child["mountIndex"] = index;
-    const childDOM = createDOM(child);
-    parentNode.appendChild(childDOM);
-  });
+function completeUnitOfWork(currentFiber) {
+  const { parent: parentFiber, effectTag } = currentFiber;
+  if (parentFiber) {
+    if (!parentFiber.firstEffect) {
+      parentFiber.firstEffect = currentFiber.firstEffect;
+    }
+    if (currentFiber.lastEffect) {
+      if (parentFiber.lastEffect) {
+        parentFiber.lastEffect.nextEffect = currentFiber.firstEffect;
+      }
+      parentFiber.lastEffect = currentFiber.lastEffect;
+    }
+    if (effectTag) {
+      if (parentFiber.lastEffect) {
+        parentFiber.lastEffect.nextEffect = currentFiber;
+      } else {
+        parentFiber.firstEffect = currentFiber;
+      }
+      parentFiber.lastEffect = currentFiber;
+    }
+  }
 }
-function setProps(dom, props) {
-  for (let key in props) {
-    setProp(dom, key, props[key]);
+function beginWork(currentFiber) {
+  const { tag } = currentFiber;
+  if (tag === TAG_ROOT) {
+    updateHostRoot(currentFiber);
+  } else if (tag === TAG_TEXT) {
+    updateHostText(currentFiber);
+  } else if (tag === TAG_ELEMENT) {
+    updateHostElement(currentFiber);
+  }
+}
+function updateHostElement(currentFiber) {
+  if (!currentFiber.stateNode) {
+    currentFiber.stateNode = createDOM(currentFiber);
+  }
+  const children = currentFiber.children;
+  reconcileChildren(currentFiber, children);
+}
+function updateHostText(currentFiber) {
+  if (!currentFiber.stateNode) {
+    currentFiber.stateNode = createDOM(currentFiber);
+  }
+}
+function updateHostRoot(currentFiber) {
+  const children = currentFiber.children;
+  reconcileChildren(currentFiber, children);
+}
+function reconcileChildren(currentFiber, children) {
+  let childrenIndex = 0;
+  let prevSibling;
+  while (childrenIndex < children.length) {
+    const child = children[childrenIndex++];
+    let tag;
+    if (child.type === TEXT) {
+      tag = TAG_TEXT;
+    } else if (isString(child.type)) {
+      tag = TAG_ELEMENT;
+    } else {
+      tag = TAG_COMMENT;
+    }
+    const childFiber = {
+      tag,
+      type: child.type,
+      props: child.props,
+      children: child.children,
+      stateNode: null,
+      parent: currentFiber,
+      effectTag: PLACEMENT,
+      nextEffect: null
+    };
+    if (childrenIndex === 1) {
+      currentFiber.child = childFiber;
+    } else {
+      prevSibling.sibling = childFiber;
+    }
+    prevSibling = childFiber;
+  }
+}
+function createDOM(currentFiber) {
+  const { tag } = currentFiber;
+  if (tag === TAG_TEXT) {
+    return document.createTextNode(currentFiber.children);
+  } else if (tag == TAG_ELEMENT) {
+    const dom = document.createElement(currentFiber.type);
+    updateDOM(dom, {}, currentFiber.props);
+    return dom;
+  }
+}
+function updateDOM(dom, oldProps, newProps) {
+  setProps(dom, oldProps, newProps);
+}
+function setProps(dom, oldProps, newProps) {
+  for (let key in oldProps) {
+    if (hasOwnProperty(newProps, key)) {
+      dom.removeAttribute(key);
+    }
+  }
+  for (let key in newProps) {
+    setProp(dom, key, newProps[key]);
   }
 }
 function setProp(dom, key, value) {
   if (/^on/.test(key)) {
-    addEventListener(dom, key, value);
+    dom[key.toLowerCase()] = value;
   } else if (key === "className") {
     dom.className = value;
   } else if (key === "style") {
@@ -183,39 +210,20 @@ function setProp(dom, key, value) {
     dom.setAttribute(key, value);
   }
 }
-function createClassComponentDOM(element) {
-  const { type, ref, props } = element;
-  const componentInstance = new type(props);
-  setContext(componentInstance, type);
-  setRef(componentInstance, ref);
-  componentInstance.componentWillMount();
-  const renderElement = componentInstance.render();
-  const dom = createDOM(renderElement);
-  renderElement.dom = dom;
-  componentInstance.renderElement = renderElement;
-  element.componentInstance = componentInstance;
-  batchedUpdates(() => componentInstance.componentDidMount());
-  componentInstance.isOverMount = true;
-  return dom;
-}
-function setContext(componentInstance, classType) {
-  if (classType.contextType) {
-    componentInstance.context = classType.contextType.Provider.value;
-  }
-}
-function createFunctionComponentDOM(element) {
-  const { type, props } = element;
-  const renderElement = type(props);
-  const dom = createDOM(renderElement);
-  renderElement.dom = dom;
-  element.renderElement = renderElement;
-  return dom;
+function scheduleRoot(rootFiber) {
+  workInProgressRoot = rootFiber;
+  nextUnitOfWork = rootFiber;
 }
 
 // packages/react-dom/index.ts
 function render(element, container) {
-  const dom = createDOM(element);
-  container.appendChild(dom);
+  const rootFiber = {
+    tag: TAG_ROOT,
+    stateNode: container,
+    props: {},
+    children: [element]
+  };
+  scheduleRoot(rootFiber);
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

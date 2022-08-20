@@ -3,6 +3,7 @@ import { PLACEMENT, TAG_COMMENT, TAG_ELEMENT, TAG_ROOT, TAG_TEXT, TEXT } from ".
 
 let workInProgressRoot : any = null
 let nextUnitOfWork : any = null
+let currentRoot : any = null
 
 function startWork() {
   requestIdleCallback(workLoop,{ timeout: 500 })
@@ -13,7 +14,7 @@ function workLoop(deadline : any) {
   let shouldYield = false
   while(nextUnitOfWork && !shouldYield) {
     nextUnitOfWork = performUnitOfWork(nextUnitOfWork)
-    shouldYield = deadline.timeRemainning() < 1
+    shouldYield = deadline.timeRemaining() < 1
   }
   if(!nextUnitOfWork && workInProgressRoot) {
     commitRoot()
@@ -27,6 +28,7 @@ function commitRoot() {
     commitWork(currentFiber)
     currentFiber = currentFiber.nextEffect
   }
+  currentRoot = workInProgressRoot
   workInProgressRoot = null
 }
 
@@ -55,7 +57,7 @@ function performUnitOfWork(currentFiber : any) {
 }
 
 function completeUnitOfWork(currentFiber : any) {
-  const { parentFiber,effectTag } = currentFiber.parent
+  const { parent: parentFiber,effectTag } = currentFiber
   if(parentFiber) {
     if(!parentFiber.firstEffect) {
       parentFiber.firstEffect = currentFiber.firstEffect
@@ -84,7 +86,7 @@ function beginWork(currentFiber : any) {
   } else if(tag === TAG_TEXT) {
     updateHostText(currentFiber)
   } else if(tag === TAG_ELEMENT) {
-    updateHostElement(TAG_ELEMENT)
+    updateHostElement(currentFiber)
   }
 }
 
