@@ -1,9 +1,12 @@
-import { hasOwnProperty, isString } from "../../shared"
-import { DELETION, PLACEMENT, TAG_COMMENT, TAG_ELEMENT, TAG_ROOT, TAG_TEXT, TEXT, UPDATE } from "../../types"
+import { hasOwnProperty, isFunction, isString } from "../../shared"
+import { DELETION, PLACEMENT, TAG_CLASS_COMPONENT, TAG_COMMENT, TAG_ELEMENT, TAG_FUNCTION_COMPONENT, TAG_ROOT, TAG_TEXT, TEXT, UPDATE } from "../../types"
+import { Updater, UpdaterQueue } from "./updater"
 
 let workInProgressRoot : any = null
 let nextUnitOfWork : any = null
 let currentRoot : any = null
+let workInProgressFiber : any = null
+let hookIndex : number = 0
 const deletions : Array<any> = []
 
 function startWork() {
@@ -38,22 +41,42 @@ function commitRoot() {
 function commitWork(currentFiber : any) {
   if(!currentFiber) return
   const  { 
-    parent: parentFiber,effectTag,stateNode,
+    tag,effectTag,stateNode,
     props,type,children,alternate 
   } = currentFiber
+  let parentFiber = currentFiber.parent
+  while(
+    parentFiber.tag !== TAG_ELEMENT && 
+    parentFiber.tag !== TAG_ROOT &&
+    parentFiber.tag !== TAG_TEXT
+  ) {
+    parentFiber = parentFiber.parent
+  }
   const parentNode = parentFiber.stateNode
   if(effectTag === PLACEMENT) {
-    parentNode.appendChild(stateNode)
+    let nextFiber = currentFiber
+    while(nextFiber.tag !== TAG_ELEMENT && nextFiber.tag !== TAG_TEXT) {
+      nextFiber = currentFiber.child
+    }
+    parentNode.appendChild(nextFiber.stateNode)
   } else if(effectTag === DELETION) {
-    parentNode.removeChild(stateNode)
+    commitDeletion(currentFiber,parentNode)
   } else if(effectTag === UPDATE) {
     if(type === TEXT && children !== alternate.children) {
       stateNode.textContent = children
-    } else {
+    } else if(tag !== TAG_CLASS_COMPONENT && tag !== TAG_FUNCTION_COMPONENT) {
       updateDOM(stateNode,alternate.props,props)
     }
   }
   currentFiber.effectTag = null
+}
+
+function commitDeletion(currentFiber : any,parentNode : Node) {
+  if(currentFiber.tag === TAG_ELEMENT && currentFiber.tag === TAG_TEXT) {
+    parentNode.removeChild(currentFiber.stateNode)
+  } else {
+    commitDeletion(currentFiber.child,parentNode)
+  }
 }
 
 function performUnitOfWork(currentFiber : any) {
@@ -101,7 +124,31 @@ function beginWork(currentFiber : any) {
     updateHostText(currentFiber)
   } else if(tag === TAG_ELEMENT) {
     updateHostElement(currentFiber)
+  } else if(tag === TAG_CLASS_COMPONENT) {
+    updateClassComponent(currentFiber)
+  } else if(tag === TAG_FUNCTION_COMPONENT) {
+    updateFunctionComponent(currentFiber)
   }
+}
+
+function updateFunctionComponent(currentFiber : any) {
+  workInProgressFiber = currentFiber
+  hookIndex = 0
+  workInProgressFiber.hooks = []
+  const newChildren = currentFiber.type(currentFiber.props)
+  reconcileChildren(currentFiber,newChildren)
+}
+
+function updateClassComponent(currentFiber : any) {
+  if(!currentFiber.stateNode) {
+    currentFiber.stateNode = new currentFiber.type(currentFiber.props)
+    currentFiber.stateNode.internalFiber = currentFiber
+    currentFiber.updaterQueue = new UpdaterQueue()
+  }
+  currentFiber.stateNode.state = currentFiber.updaterQueue.forceUpdate(currentFiber.stateNode.state)
+  const newElement = currentFiber.stateNode.render()
+  const newChildren = [ newElement ]
+  reconcileChildren(currentFiber,newChildren)
 }
 
 function updateHostElement(currentFiber : any) {
@@ -126,6 +173,9 @@ function updateHostRoot(currentFiber : any) {
 function reconcileChildren(currentFiber : any,children : Array<any>) {
   let childrenIndex = 0
   let oldFiber = currentFiber.alternate && currentFiber.alternate.child
+  if(oldFiber) {
+    oldFiber.firstEffect = oldFiber.lastEffect = oldFiber.nextEffect = null
+  }
   let prevSibling : any
   while(childrenIndex < children.length) {
     const newChild = children[childrenIndex++]
@@ -133,20 +183,33 @@ function reconcileChildren(currentFiber : any,children : Array<any>) {
 
     let newFiber
     if(sameType) {
-      newFiber = {
-        tag: oldFiber.tag,
-        type: oldFiber.type,
-        props: newChild.props,
-        children: newChild.children,
-        stateNode: oldFiber.stateNode,
-        parent: currentFiber,
-        alternate: oldFiber,
-        effectTag: UPDATE,
-        nextEffect: null
+      if(oldFiber.alternate) {
+        newFiber = oldFiber.alternate
+        newFiber.props = newChild.props
+        newFiber.children = newChild.children
+        newFiber.alternate = oldFiber
+        newFiber.effectTag = UPDATE
+        newFiber.updaterQueue = oldFiber.updaterQueue || new UpdaterQueue()
+        newFiber.nextEffect = null
+      } else {
+        newFiber = {
+          tag: oldFiber.tag,
+          type: oldFiber.type,
+          props: newChild.props,
+          children: newChild.children,
+          stateNode: oldFiber.stateNode,
+          parent: currentFiber,
+          updaterQueue: oldFiber.updaterQueue || new UpdaterQueue(),
+          alternate: oldFiber,
+          effectTag: UPDATE,
+          nextEffect: null
+        }
       }
     } else if(newChild){
       let tag : Symbol
-      if(newChild.type === TEXT) {
+      if(newChild && isFunction(newChild.type)) {
+        tag = newChild.type.prototype.isReactComponent ? TAG_CLASS_COMPONENT : TAG_FUNCTION_COMPONENT
+      } else if(newChild.type === TEXT) {
         tag = TAG_TEXT
       } else if(isString(newChild.type)) {
         tag = TAG_ELEMENT
@@ -161,6 +224,7 @@ function reconcileChildren(currentFiber : any,children : Array<any>) {
         stateNode: null,
         parent: currentFiber,
         effectTag: PLACEMENT,
+        updaterQueue: new UpdaterQueue(),
         nextEffect: null
       }
     } else if(oldFiber){
@@ -221,15 +285,24 @@ function setProp(dom : HTMLElement,key : string,value : any) {
   }
 }
 
-function scheduleRoot(rootFiber : any) {
+function scheduleRoot(rootFiber? : any) {
   if(currentRoot && currentRoot.alternate) {
     workInProgressRoot = currentRoot.alternate
-    workInProgressRoot.props = rootFiber.props
-    workInProgressRoot.children = rootFiber.children
     workInProgressRoot.alternate = currentRoot
+    if(rootFiber) {
+      workInProgressRoot.props = rootFiber.props
+      workInProgressRoot.children = rootFiber.children
+    }
   } else if(currentRoot) {
-    rootFiber.alternate = currentRoot
-    workInProgressRoot = rootFiber
+    if(rootFiber) {
+      rootFiber.alternate = currentRoot
+      workInProgressRoot = rootFiber
+    } else {
+      workInProgressRoot = {
+        ...currentRoot,
+        alternate: currentRoot
+      }
+    }
   } else {
     workInProgressRoot = rootFiber
   }
@@ -239,6 +312,35 @@ function scheduleRoot(rootFiber : any) {
   nextUnitOfWork = workInProgressRoot
 }
 
+function useReducer(reducer : any,initialValue : any) {
+  let hook = workInProgressFiber.alternate &&
+             workInProgressFiber.alternate.hooks &&
+             workInProgressFiber.alternate.hooks[hookIndex]
+  if(hook) {
+    hook.state = hook.updaterQueue.forceUpdate(hook.state)
+  } else {
+    hook = {
+      state: initialValue,
+      updaterQueue: new UpdaterQueue()
+    }
+  }
+  const dispatch = (action : any) => {
+    const payload = reducer ? reducer(hook.state,action) : action
+    hook.updaterQueue.enqueueUpdate(
+      new Updater(payload)
+    )
+    scheduleRoot()
+  }
+  workInProgressFiber.hooks[hookIndex++] = hook
+  return [ hook.state,dispatch ]
+}
+
+function useState(initialValue : any) {
+  return useReducer(null,initialValue)
+}
+
 export {
   scheduleRoot,
+  useReducer,
+  useState,
 }

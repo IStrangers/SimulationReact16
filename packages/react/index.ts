@@ -1,5 +1,7 @@
 import { isFunction, isObject } from "../shared"
 import { TEXT } from "../types"
+import { Component } from "./src/component"
+import { useState,useReducer } from "./src/scheduler"
 
 function createElement(type : any,config : any,...children : Array<any>) {
   return {
@@ -22,5 +24,8 @@ function createElement(type : any,config : any,...children : Array<any>) {
 }
 
 export {
+  Component,
   createElement,
+  useState,
+  useReducer,
 }

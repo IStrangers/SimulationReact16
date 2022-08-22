@@ -5,7 +5,8 @@ const TAG_ROOT = Symbol.for("TAG_ROOT")
 const TAG_ELEMENT = Symbol.for("TAG_ELEMENT")
 const TAG_TEXT = Symbol.for("TAG_TEXT")
 const TAG_COMMENT = Symbol.for("TAG_COMMENT")
-
+const TAG_CLASS_COMPONENT = Symbol.for("TAG_CLASS_COMPONENT")
+const TAG_FUNCTION_COMPONENT = Symbol.for("TAG_FUNCTION_COMPONENT")
 export {
   TEXT,
 
@@ -13,4 +14,6 @@ export {
   TAG_ELEMENT,
   TAG_TEXT,
   TAG_COMMENT,
+  TAG_CLASS_COMPONENT,
+  TAG_FUNCTION_COMPONENT,
 }

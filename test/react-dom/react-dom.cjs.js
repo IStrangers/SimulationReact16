@@ -28,6 +28,9 @@ module.exports = __toCommonJS(react_dom_exports);
 function isString(value) {
   return typeof value === "string";
 }
+function isFunction(value) {
+  return typeof value === "function";
+}
 function hasOwnProperty(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -38,13 +41,39 @@ var TAG_ROOT = Symbol.for("TAG_ROOT");
 var TAG_ELEMENT = Symbol.for("TAG_ELEMENT");
 var TAG_TEXT = Symbol.for("TAG_TEXT");
 var TAG_COMMENT = Symbol.for("TAG_COMMENT");
+var TAG_CLASS_COMPONENT = Symbol.for("TAG_CLASS_COMPONENT");
+var TAG_FUNCTION_COMPONENT = Symbol.for("TAG_FUNCTION_COMPONENT");
 
 // packages/types/src/effectType.ts
 var PLACEMENT = Symbol.for("PLACEMENT");
 var UPDATE = Symbol.for("UPDATE");
 var DELETION = Symbol.for("DELETION");
 
-// packages/react/src/schedule.ts
+// packages/react/src/updater.ts
+var UpdaterQueue = class {
+  firstUpdater = null;
+  lastUpdater = null;
+  enqueueUpdate(updater) {
+    if (this.lastUpdater === null) {
+      this.firstUpdater = this.lastUpdater = updater;
+    } else {
+      this.lastUpdater.nextUpdater = updater;
+      this.lastUpdater = updater;
+    }
+  }
+  forceUpdate(state) {
+    let currentUpdater = this.firstUpdater;
+    while (currentUpdater) {
+      const nextState = isFunction(currentUpdater.payload) ? currentUpdater.payload(state) : currentUpdater.payload;
+      state = { ...state, ...nextState };
+      currentUpdater = currentUpdater.nextUpdater;
+    }
+    this.firstUpdater = this.lastUpdater = null;
+    return state;
+  }
+};
+
+// packages/react/src/scheduler.ts
 var workInProgressRoot = null;
 var nextUnitOfWork = null;
 var currentRoot = null;
@@ -79,7 +108,7 @@ function commitWork(currentFiber) {
   if (!currentFiber)
     return;
   const {
-    parent: parentFiber,
+    tag,
     effectTag,
     stateNode,
     props,
@@ -87,19 +116,34 @@ function commitWork(currentFiber) {
     children,
     alternate
   } = currentFiber;
+  let parentFiber = currentFiber.parent;
+  while (parentFiber.tag !== TAG_ELEMENT && parentFiber.tag !== TAG_ROOT && parentFiber.tag !== TAG_TEXT) {
+    parentFiber = parentFiber.parent;
+  }
   const parentNode = parentFiber.stateNode;
   if (effectTag === PLACEMENT) {
-    parentNode.appendChild(stateNode);
+    let nextFiber = currentFiber;
+    while (nextFiber.tag !== TAG_ELEMENT && nextFiber.tag !== TAG_TEXT) {
+      nextFiber = currentFiber.child;
+    }
+    parentNode.appendChild(nextFiber.stateNode);
   } else if (effectTag === DELETION) {
-    parentNode.removeChild(stateNode);
+    commitDeletion(currentFiber, parentNode);
   } else if (effectTag === UPDATE) {
     if (type === TEXT && children !== alternate.children) {
       stateNode.textContent = children;
-    } else {
+    } else if (tag !== TAG_CLASS_COMPONENT) {
       updateDOM(stateNode, alternate.props, props);
     }
   }
   currentFiber.effectTag = null;
+}
+function commitDeletion(currentFiber, parentNode) {
+  if (currentFiber.tag === TAG_ELEMENT && currentFiber.tag === TAG_TEXT) {
+    parentNode.removeChild(currentFiber.stateNode);
+  } else {
+    commitDeletion(currentFiber.child, parentNode);
+  }
 }
 function performUnitOfWork(currentFiber) {
   beginWork(currentFiber);
@@ -144,7 +188,24 @@ function beginWork(currentFiber) {
     updateHostText(currentFiber);
   } else if (tag === TAG_ELEMENT) {
     updateHostElement(currentFiber);
+  } else if (tag === TAG_CLASS_COMPONENT) {
+    updateClassComponent(currentFiber);
+  } else if (tag === TAG_FUNCTION_COMPONENT) {
+    updateFunctionComponent(currentFiber);
   }
+}
+function updateFunctionComponent(currentFiber) {
+}
+function updateClassComponent(currentFiber) {
+  if (!currentFiber.stateNode) {
+    currentFiber.stateNode = new currentFiber.type(currentFiber.props);
+    currentFiber.stateNode.internalFiber = currentFiber;
+    currentFiber.updaterQueue = new UpdaterQueue();
+  }
+  currentFiber.stateNode.state = currentFiber.updaterQueue.forceUpdate(currentFiber.stateNode.state);
+  const newElement = currentFiber.stateNode.render();
+  const newChildren = [newElement];
+  reconcileChildren(currentFiber, newChildren);
 }
 function updateHostElement(currentFiber) {
   if (!currentFiber.stateNode) {
@@ -165,26 +226,42 @@ function updateHostRoot(currentFiber) {
 function reconcileChildren(currentFiber, children) {
   let childrenIndex = 0;
   let oldFiber = currentFiber.alternate && currentFiber.alternate.child;
+  if (oldFiber) {
+    oldFiber.firstEffect = oldFiber.lastEffect = oldFiber.nextEffect = null;
+  }
   let prevSibling;
   while (childrenIndex < children.length) {
     const newChild = children[childrenIndex++];
     const sameType = oldFiber && newChild && oldFiber.type === newChild.type;
     let newFiber;
     if (sameType) {
-      newFiber = {
-        tag: oldFiber.tag,
-        type: oldFiber.type,
-        props: newChild.props,
-        children: newChild.children,
-        stateNode: oldFiber.stateNode,
-        parent: currentFiber,
-        alternate: oldFiber,
-        effectTag: UPDATE,
-        nextEffect: null
-      };
+      if (oldFiber.alternate) {
+        newFiber = oldFiber.alternate;
+        newFiber.props = newChild.props;
+        newFiber.children = newChild.children;
+        newFiber.alternate = oldFiber;
+        newFiber.effectTag = UPDATE;
+        newFiber.updaterQueue = oldFiber.updaterQueue || new UpdaterQueue();
+        newFiber.nextEffect = null;
+      } else {
+        newFiber = {
+          tag: oldFiber.tag,
+          type: oldFiber.type,
+          props: newChild.props,
+          children: newChild.children,
+          stateNode: oldFiber.stateNode,
+          parent: currentFiber,
+          updaterQueue: oldFiber.updaterQueue || new UpdaterQueue(),
+          alternate: oldFiber,
+          effectTag: UPDATE,
+          nextEffect: null
+        };
+      }
     } else if (newChild) {
       let tag;
-      if (newChild.type === TEXT) {
+      if (newChild && isFunction(newChild.type)) {
+        tag = newChild.type.prototype.isReactComponent ? TAG_CLASS_COMPONENT : TAG_FUNCTION_COMPONENT;
+      } else if (newChild.type === TEXT) {
         tag = TAG_TEXT;
       } else if (isString(newChild.type)) {
         tag = TAG_ELEMENT;
@@ -199,6 +276,7 @@ function reconcileChildren(currentFiber, children) {
         stateNode: null,
         parent: currentFiber,
         effectTag: PLACEMENT,
+        updaterQueue: new UpdaterQueue(),
         nextEffect: null
       };
     } else if (oldFiber) {
@@ -255,12 +333,21 @@ function setProp(dom, key, value) {
 function scheduleRoot(rootFiber) {
   if (currentRoot && currentRoot.alternate) {
     workInProgressRoot = currentRoot.alternate;
-    workInProgressRoot.props = rootFiber.props;
-    workInProgressRoot.children = rootFiber.children;
     workInProgressRoot.alternate = currentRoot;
+    if (rootFiber) {
+      workInProgressRoot.props = rootFiber.props;
+      workInProgressRoot.children = rootFiber.children;
+    }
   } else if (currentRoot) {
-    rootFiber.alternate = currentRoot;
-    workInProgressRoot = rootFiber;
+    if (rootFiber) {
+      rootFiber.alternate = currentRoot;
+      workInProgressRoot = rootFiber;
+    } else {
+      workInProgressRoot = {
+        ...currentRoot,
+        alternate: currentRoot
+      };
+    }
   } else {
     workInProgressRoot = rootFiber;
   }

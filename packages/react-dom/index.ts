@@ -1,4 +1,4 @@
-import { scheduleRoot } from "../react/src/schedule"
+import { scheduleRoot } from "../react/src/scheduler"
 import { TAG_ROOT } from "../types"
 
 function render(element : any, container : Node) {
