@@ -56,24 +56,36 @@
     //   )
     // )
 
-    class ClassComponent extends React.Component {
+    // class ClassComponent extends React.Component {
 
-      constructor(props) {
-        super(props)
-        this.state = {
-          count: 1
-        }
+    //   constructor(props) {
+    //     super(props)
+    //     this.state = {
+    //       count: 1
+    //     }
+    //   }
+
+    //   onClick = () => {
+    //     this.setState({count: this.state.count + 1})
+    //   }
+
+    //   render() {
+    //     return React.createElement("button",{ onClick: this.onClick },this.state.count)
+    //   }
+    // }
+
+    function FunctionComponent() {
+
+      const [count,setCount] = React.useState(0)
+
+      const onClick = () => {
+        setCount(count + 1)
       }
 
-      onClick = () => {
-        this.setState({count: this.state.count + 1})
-      }
-
-      render() {
-        return React.createElement("button",{ onClick: this.onClick },this.state.count)
-      }
+      return React.createElement("button",{ onClick },count)
     }
-    const element = React.createElement(ClassComponent)
+
+    const element = React.createElement(FunctionComponent)
     ReactDOM.render(element,document.getElementById("root"))
   </script>
 </body>

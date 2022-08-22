@@ -1,4 +1,4 @@
-import { isFunction } from "../../shared"
+import { isFunction, isObject } from "../../shared"
 
 class Updater {
 
@@ -27,8 +27,8 @@ class UpdaterQueue {
   forceUpdate(state : any) {
     let currentUpdater = this.firstUpdater
     while(currentUpdater) {
-      const nextState = isFunction(currentUpdater.payload) ? currentUpdater.payload(state) : currentUpdater.payload
-      state = { ...state,...nextState}
+      const nextState : any = isFunction(currentUpdater.payload) ? currentUpdater.payload(state) : currentUpdater.payload
+      state = isObject(nextState) ? { ...state,...nextState} : nextState
       currentUpdater = currentUpdater.nextUpdater
     }
     this.firstUpdater = this.lastUpdater = null

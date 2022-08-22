@@ -48,14 +48,15 @@ function commitWork(currentFiber : any) {
   while(
     parentFiber.tag !== TAG_ELEMENT && 
     parentFiber.tag !== TAG_ROOT &&
-    parentFiber.tag !== TAG_TEXT
+    parentFiber.tag !== TAG_TEXT &&
+    parentFiber.tag !== TAG_COMMENT
   ) {
     parentFiber = parentFiber.parent
   }
   const parentNode = parentFiber.stateNode
   if(effectTag === PLACEMENT) {
     let nextFiber = currentFiber
-    while(nextFiber.tag !== TAG_ELEMENT && nextFiber.tag !== TAG_TEXT) {
+    while(nextFiber.tag !== TAG_ELEMENT && nextFiber.tag !== TAG_TEXT && nextFiber.tag !== TAG_COMMENT) {
       nextFiber = currentFiber.child
     }
     parentNode.appendChild(nextFiber.stateNode)
@@ -72,7 +73,7 @@ function commitWork(currentFiber : any) {
 }
 
 function commitDeletion(currentFiber : any,parentNode : Node) {
-  if(currentFiber.tag === TAG_ELEMENT && currentFiber.tag === TAG_TEXT) {
+  if(currentFiber.tag === TAG_ELEMENT || currentFiber.tag === TAG_TEXT) {
     parentNode.removeChild(currentFiber.stateNode)
   } else {
     commitDeletion(currentFiber.child,parentNode)
@@ -128,6 +129,14 @@ function beginWork(currentFiber : any) {
     updateClassComponent(currentFiber)
   } else if(tag === TAG_FUNCTION_COMPONENT) {
     updateFunctionComponent(currentFiber)
+  } else if(tag === TAG_COMMENT) {
+    updateHostComment(currentFiber)
+  }
+}
+
+function updateHostComment(currentFiber : any) {
+  if(!currentFiber.stateNode) {
+    currentFiber.stateNode = createDOM(currentFiber)
   }
 }
 
@@ -135,7 +144,7 @@ function updateFunctionComponent(currentFiber : any) {
   workInProgressFiber = currentFiber
   hookIndex = 0
   workInProgressFiber.hooks = []
-  const newChildren = currentFiber.type(currentFiber.props)
+  const newChildren = [ currentFiber.type(currentFiber.props) ]
   reconcileChildren(currentFiber,newChildren)
 }
 
@@ -252,7 +261,9 @@ function reconcileChildren(currentFiber : any,children : Array<any>) {
 
 function createDOM(currentFiber : any) {
   const { tag } = currentFiber
-  if(tag === TAG_TEXT) {
+  if(tag === TAG_COMMENT) {
+    return document.createComment(currentFiber.children)
+  } else if(tag === TAG_TEXT) {
     return document.createTextNode(currentFiber.children)
   } else if(tag == TAG_ELEMENT) {
     const dom = document.createElement(currentFiber.type)

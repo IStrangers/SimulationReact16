@@ -77,7 +77,7 @@ var React = (() => {
       let currentUpdater = this.firstUpdater;
       while (currentUpdater) {
         const nextState = isFunction(currentUpdater.payload) ? currentUpdater.payload(state) : currentUpdater.payload;
-        state = { ...state, ...nextState };
+        state = isObject(nextState) ? { ...state, ...nextState } : nextState;
         currentUpdater = currentUpdater.nextUpdater;
       }
       this.firstUpdater = this.lastUpdater = null;
@@ -131,13 +131,13 @@ var React = (() => {
       alternate
     } = currentFiber;
     let parentFiber = currentFiber.parent;
-    while (parentFiber.tag !== TAG_ELEMENT && parentFiber.tag !== TAG_ROOT && parentFiber.tag !== TAG_TEXT) {
+    while (parentFiber.tag !== TAG_ELEMENT && parentFiber.tag !== TAG_ROOT && parentFiber.tag !== TAG_TEXT && parentFiber.tag !== TAG_COMMENT) {
       parentFiber = parentFiber.parent;
     }
     const parentNode = parentFiber.stateNode;
     if (effectTag === PLACEMENT) {
       let nextFiber = currentFiber;
-      while (nextFiber.tag !== TAG_ELEMENT && nextFiber.tag !== TAG_TEXT) {
+      while (nextFiber.tag !== TAG_ELEMENT && nextFiber.tag !== TAG_TEXT && nextFiber.tag !== TAG_COMMENT) {
         nextFiber = currentFiber.child;
       }
       parentNode.appendChild(nextFiber.stateNode);
@@ -153,7 +153,7 @@ var React = (() => {
     currentFiber.effectTag = null;
   }
   function commitDeletion(currentFiber, parentNode) {
-    if (currentFiber.tag === TAG_ELEMENT && currentFiber.tag === TAG_TEXT) {
+    if (currentFiber.tag === TAG_ELEMENT || currentFiber.tag === TAG_TEXT) {
       parentNode.removeChild(currentFiber.stateNode);
     } else {
       commitDeletion(currentFiber.child, parentNode);
@@ -206,13 +206,20 @@ var React = (() => {
       updateClassComponent(currentFiber);
     } else if (tag === TAG_FUNCTION_COMPONENT) {
       updateFunctionComponent(currentFiber);
+    } else if (tag === TAG_COMMENT) {
+      updateHostComment(currentFiber);
+    }
+  }
+  function updateHostComment(currentFiber) {
+    if (!currentFiber.stateNode) {
+      currentFiber.stateNode = createDOM(currentFiber);
     }
   }
   function updateFunctionComponent(currentFiber) {
     workInProgressFiber = currentFiber;
     hookIndex = 0;
     workInProgressFiber.hooks = [];
-    const newChildren = currentFiber.type(currentFiber.props);
+    const newChildren = [currentFiber.type(currentFiber.props)];
     reconcileChildren(currentFiber, newChildren);
   }
   function updateClassComponent(currentFiber) {
@@ -320,7 +327,9 @@ var React = (() => {
   }
   function createDOM(currentFiber) {
     const { tag } = currentFiber;
-    if (tag === TAG_TEXT) {
+    if (tag === TAG_COMMENT) {
+      return document.createComment(currentFiber.children);
+    } else if (tag === TAG_TEXT) {
       return document.createTextNode(currentFiber.children);
     } else if (tag == TAG_ELEMENT) {
       const dom = document.createElement(currentFiber.type);
