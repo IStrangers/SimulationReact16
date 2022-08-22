@@ -3,10 +3,10 @@ import { Updater, UpdaterQueue } from "./updater"
 
 class Component {
 
-  public updaterQueue = new UpdaterQueue()
+  public updaterQueue
 
   constructor(public props : any) {
-
+    this.updaterQueue = new UpdaterQueue()
   }
 
   setState(playload : any) {

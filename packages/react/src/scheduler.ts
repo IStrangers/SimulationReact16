@@ -143,7 +143,7 @@ function updateClassComponent(currentFiber : any) {
   if(!currentFiber.stateNode) {
     currentFiber.stateNode = new currentFiber.type(currentFiber.props)
     currentFiber.stateNode.internalFiber = currentFiber
-    currentFiber.updaterQueue = new UpdaterQueue()
+    currentFiber.updaterQueue = currentFiber.stateNode.updaterQueue
   }
   currentFiber.stateNode.state = currentFiber.updaterQueue.forceUpdate(currentFiber.stateNode.state)
   const newElement = currentFiber.stateNode.render()
@@ -177,7 +177,7 @@ function reconcileChildren(currentFiber : any,children : Array<any>) {
     oldFiber.firstEffect = oldFiber.lastEffect = oldFiber.nextEffect = null
   }
   let prevSibling : any
-  while(childrenIndex < children.length) {
+  while(childrenIndex < children.length || oldFiber) {
     const newChild = children[childrenIndex++]
     const sameType = oldFiber && newChild && oldFiber.type === newChild.type
 
@@ -205,43 +205,48 @@ function reconcileChildren(currentFiber : any,children : Array<any>) {
           nextEffect: null
         }
       }
-    } else if(newChild){
-      let tag : Symbol
-      if(newChild && isFunction(newChild.type)) {
-        tag = newChild.type.prototype.isReactComponent ? TAG_CLASS_COMPONENT : TAG_FUNCTION_COMPONENT
-      } else if(newChild.type === TEXT) {
-        tag = TAG_TEXT
-      } else if(isString(newChild.type)) {
-        tag = TAG_ELEMENT
-      } else {
-        tag = TAG_COMMENT
+    } else {
+      if(newChild){
+        let tag : Symbol
+        if(newChild && isFunction(newChild.type)) {
+          tag = newChild.type.prototype.isReactComponent ? TAG_CLASS_COMPONENT : TAG_FUNCTION_COMPONENT
+        } else if(newChild.type === TEXT) {
+          tag = TAG_TEXT
+        } else if(isString(newChild.type)) {
+          tag = TAG_ELEMENT
+        } else {
+          tag = TAG_COMMENT
+        }
+        newFiber = {
+          tag,
+          type: newChild.type,
+          props: newChild.props,
+          children: newChild.children,
+          stateNode: null,
+          parent: currentFiber,
+          effectTag: PLACEMENT,
+          updaterQueue: new UpdaterQueue(),
+          nextEffect: null
+        }
+      } 
+      if(oldFiber){
+        oldFiber.effectTag = DELETION
+        deletions.push(oldFiber)
       }
-      newFiber = {
-        tag,
-        type: newChild.type,
-        props: newChild.props,
-        children: newChild.children,
-        stateNode: null,
-        parent: currentFiber,
-        effectTag: PLACEMENT,
-        updaterQueue: new UpdaterQueue(),
-        nextEffect: null
-      }
-    } else if(oldFiber){
-      oldFiber.effectTag = DELETION
-      deletions.push(oldFiber)
     }
 
     if(oldFiber) {
       oldFiber = oldFiber.sibling
     }
 
-    if(childrenIndex === 1) {
-      currentFiber.child = newFiber
-    } else {
-      prevSibling.sibling = newFiber
+    if(newFiber) {
+      if(childrenIndex === 1) {
+        currentFiber.child = newFiber
+      } else {
+        prevSibling.sibling = newFiber
+      }
+      prevSibling = newFiber
     }
-    prevSibling = newFiber
   }
 }
 
@@ -306,9 +311,7 @@ function scheduleRoot(rootFiber? : any) {
   } else {
     workInProgressRoot = rootFiber
   }
-  (workInProgressRoot.firstEffect =
-  workInProgressRoot.lastEffect = 
-  workInProgressRoot.nextEffect = null)
+  workInProgressRoot.firstEffect = workInProgressRoot.lastEffect = workInProgressRoot.nextEffect = null
   nextUnitOfWork = workInProgressRoot
 }
 

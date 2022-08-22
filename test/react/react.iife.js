@@ -22,7 +22,9 @@ var React = (() => {
   var react_exports = {};
   __export(react_exports, {
     Component: () => Component,
-    createElement: () => createElement
+    createElement: () => createElement,
+    useReducer: () => useReducer,
+    useState: () => useState
   });
 
   // packages/shared/src/utils.ts
@@ -87,6 +89,8 @@ var React = (() => {
   var workInProgressRoot = null;
   var nextUnitOfWork = null;
   var currentRoot = null;
+  var workInProgressFiber = null;
+  var hookIndex = 0;
   var deletions = [];
   function startWork() {
     requestIdleCallback(workLoop, { timeout: 500 });
@@ -142,7 +146,7 @@ var React = (() => {
     } else if (effectTag === UPDATE) {
       if (type === TEXT && children !== alternate.children) {
         stateNode.textContent = children;
-      } else if (tag !== TAG_CLASS_COMPONENT) {
+      } else if (tag !== TAG_CLASS_COMPONENT && tag !== TAG_FUNCTION_COMPONENT) {
         updateDOM(stateNode, alternate.props, props);
       }
     }
@@ -205,12 +209,17 @@ var React = (() => {
     }
   }
   function updateFunctionComponent(currentFiber) {
+    workInProgressFiber = currentFiber;
+    hookIndex = 0;
+    workInProgressFiber.hooks = [];
+    const newChildren = currentFiber.type(currentFiber.props);
+    reconcileChildren(currentFiber, newChildren);
   }
   function updateClassComponent(currentFiber) {
     if (!currentFiber.stateNode) {
       currentFiber.stateNode = new currentFiber.type(currentFiber.props);
       currentFiber.stateNode.internalFiber = currentFiber;
-      currentFiber.updaterQueue = new UpdaterQueue();
+      currentFiber.updaterQueue = currentFiber.stateNode.updaterQueue;
     }
     currentFiber.stateNode.state = currentFiber.updaterQueue.forceUpdate(currentFiber.stateNode.state);
     const newElement = currentFiber.stateNode.render();
@@ -240,7 +249,7 @@ var React = (() => {
       oldFiber.firstEffect = oldFiber.lastEffect = oldFiber.nextEffect = null;
     }
     let prevSibling;
-    while (childrenIndex < children.length) {
+    while (childrenIndex < children.length || oldFiber) {
       const newChild = children[childrenIndex++];
       const sameType = oldFiber && newChild && oldFiber.type === newChild.type;
       let newFiber;
@@ -267,41 +276,46 @@ var React = (() => {
             nextEffect: null
           };
         }
-      } else if (newChild) {
-        let tag;
-        if (newChild && isFunction(newChild.type)) {
-          tag = newChild.type.prototype.isReactComponent ? TAG_CLASS_COMPONENT : TAG_FUNCTION_COMPONENT;
-        } else if (newChild.type === TEXT) {
-          tag = TAG_TEXT;
-        } else if (isString(newChild.type)) {
-          tag = TAG_ELEMENT;
-        } else {
-          tag = TAG_COMMENT;
+      } else {
+        if (newChild) {
+          let tag;
+          if (newChild && isFunction(newChild.type)) {
+            tag = newChild.type.prototype.isReactComponent ? TAG_CLASS_COMPONENT : TAG_FUNCTION_COMPONENT;
+          } else if (newChild.type === TEXT) {
+            tag = TAG_TEXT;
+          } else if (isString(newChild.type)) {
+            tag = TAG_ELEMENT;
+          } else {
+            tag = TAG_COMMENT;
+          }
+          newFiber = {
+            tag,
+            type: newChild.type,
+            props: newChild.props,
+            children: newChild.children,
+            stateNode: null,
+            parent: currentFiber,
+            effectTag: PLACEMENT,
+            updaterQueue: new UpdaterQueue(),
+            nextEffect: null
+          };
         }
-        newFiber = {
-          tag,
-          type: newChild.type,
-          props: newChild.props,
-          children: newChild.children,
-          stateNode: null,
-          parent: currentFiber,
-          effectTag: PLACEMENT,
-          updaterQueue: new UpdaterQueue(),
-          nextEffect: null
-        };
-      } else if (oldFiber) {
-        oldFiber.effectTag = DELETION;
-        deletions.push(oldFiber);
+        if (oldFiber) {
+          oldFiber.effectTag = DELETION;
+          deletions.push(oldFiber);
+        }
       }
       if (oldFiber) {
         oldFiber = oldFiber.sibling;
       }
-      if (childrenIndex === 1) {
-        currentFiber.child = newFiber;
-      } else {
-        prevSibling.sibling = newFiber;
+      if (newFiber) {
+        if (childrenIndex === 1) {
+          currentFiber.child = newFiber;
+        } else {
+          prevSibling.sibling = newFiber;
+        }
+        prevSibling = newFiber;
       }
-      prevSibling = newFiber;
     }
   }
   function createDOM(currentFiber) {
@@ -364,13 +378,37 @@ var React = (() => {
     workInProgressRoot.firstEffect = workInProgressRoot.lastEffect = workInProgressRoot.nextEffect = null;
     nextUnitOfWork = workInProgressRoot;
   }
+  function useReducer(reducer, initialValue) {
+    let hook = workInProgressFiber.alternate && workInProgressFiber.alternate.hooks && workInProgressFiber.alternate.hooks[hookIndex];
+    if (hook) {
+      hook.state = hook.updaterQueue.forceUpdate(hook.state);
+    } else {
+      hook = {
+        state: initialValue,
+        updaterQueue: new UpdaterQueue()
+      };
+    }
+    const dispatch = (action) => {
+      const payload = reducer ? reducer(hook.state, action) : action;
+      hook.updaterQueue.enqueueUpdate(
+        new Updater(payload)
+      );
+      scheduleRoot();
+    };
+    workInProgressFiber.hooks[hookIndex++] = hook;
+    return [hook.state, dispatch];
+  }
+  function useState(initialValue) {
+    return useReducer(null, initialValue);
+  }
 
   // packages/react/src/component.ts
   var Component = class {
     constructor(props) {
       this.props = props;
+      this.updaterQueue = new UpdaterQueue();
     }
-    updaterQueue = new UpdaterQueue();
+    updaterQueue;
     setState(playload) {
       const updater = new Updater(playload);
       this.updaterQueue.enqueueUpdate(updater);
